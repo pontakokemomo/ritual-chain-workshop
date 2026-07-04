@@ -90,6 +90,7 @@ off-chain process a human (or their client) must follow correctly:
 - Empty-string answers (B7) are accepted on-chain; rejection is left to the AI judging step, consistent with keeping the required track simple.
 - Block timestamps (`block.timestamp`) can be influenced within a small margin by whoever proposes the block. This is a standard EVM consideration (not specific to this contract) and is not expected to be exploitable meaningfully given Ritual's ~350ms block time, but is noted as a theoretical boundary-timing risk.
 - Salt strength (H1) cannot be validated on-chain; it is a client-side responsibility documented in the README.
+- `judgeAll`'s `llmInput` is caller-supplied bytes (this signature is required by the assignment). The contract does not verify on-chain that the prompt actually contains the revealed answers, so the AI review is only as trustworthy as the bounty owner who built the prompt. This is consistent with the assignment's human-in-the-loop design: the AI output is advisory and the owner remains accountable for finalization.
 
 ## Appendix: on-chain verification performed during this session
 
