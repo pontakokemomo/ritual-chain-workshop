@@ -1,5 +1,13 @@
 # Advanced Track (Design Only): Ritual-Native Hidden Submissions
 
+> **Plain-language summary:** Commit-reveal still makes every answer public
+> *eventually*. This document designs a stronger (optional) alternative
+> using Ritual's secure hardware (TEE): answers are submitted encrypted,
+> decrypted only for a moment inside hardware nobody can look into, judged
+> by the AI there, and never shown to any human at all. It also honestly
+> lists the trade-offs: if no human can ever see the answers, no human can
+> double-check what the AI did with them.
+
 **Status: design document only, not implemented.** Per the assignment's own
 wording, the advanced track may be submitted as a design rather than working
 code. This document describes an alternative to the commit-reveal scheme in

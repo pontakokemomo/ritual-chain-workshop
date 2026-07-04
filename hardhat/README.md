@@ -1,134 +1,134 @@
-# Sample Hardhat 3 Project (`node:test` and `viem`)
+# AIJudge: Commit-Reveal AI Bounty Judge (Ritual Academy Homework)
 
-This project showcases a Hardhat 3 project using the native Node.js test runner (`node:test`) and the `viem` library for Ethereum interactions.
+This folder contains my homework for the Ritual Academy workshop:
+a smart contract called **AIJudge** (`contracts/AIJudge.sol`).
 
-To learn more about Hardhat 3, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3](https://hardhat.org/hardhat3-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
-
-## Project Overview
-
-This example project includes:
-
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using [`node:test`](nodejs.org/api/test.html), the new Node.js native test runner, and [`viem`](https://viem.sh/).
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
-
-## Usage
-
-### Running Tests
-
-To run all the tests in the project, execute the following command:
-
-```shell
-npx hardhat test
-```
-
-You can also selectively run the Solidity or `node:test` tests:
-
-```shell
-npx hardhat test solidity
-npx hardhat test nodejs
-```
-
-### Make a deployment to Sepolia
-
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
-
-To run the deployment to a local chain:
-
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
-```
-
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
-
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
-
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
-
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
-```
-
-After setting the variable, you can run the deployment with the Sepolia network:
-
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
-
-## AIJudge: Commit-Reveal Bounty (Ritual Academy Homework)
-
-`contracts/AIJudge.sol` is a privacy-preserving AI bounty judge, built on top of
-this project template. Answers stay hidden as commitment hashes until every
-participant has locked one in, then Ritual's AI judges only the answers that
-were actually revealed.
+**What it does, in one sentence:** people compete for a prize by submitting
+answers, an AI judges the answers, and nobody can peek at (or copy) anyone
+else's answer before judging.
 
 Deployed on Ritual Testnet (chain id 1979) at:
 `0xcBE5e9086f53F42586d4Cbb4394Db0721512DD7f`
 
-For the design rationale, see `ARCHITECTURE_NOTE.md`. For the optional
-TEE-based design that removes self-disclosure entirely, see
-`ADVANCED_TRACK_DESIGN.md`. For the test plan, see `TEST_PLAN.md`.
+---
 
-### Lifecycle walkthrough
+## The problem this contract solves
 
-1. **Create a bounty**
+The original workshop version had a flaw: as soon as you submitted your
+answer, it was stored on the blockchain **in plain text, visible to
+everyone**. A later participant could read your answer, improve it a
+little, and submit the better version. Unfair.
 
-   ```solidity
-   aiJudge.createBounty{value: rewardInWei}(
-     "Best one-paragraph explanation of X",
-     "Judged on clarity and correctness",
-     submissionDeadline, // unix timestamp
-     revealDeadline       // must be after submissionDeadline
-   );
-   ```
+The fix is a classic technique called **commit-reveal**: first everyone
+locks in a "sealed envelope" (a hash of their answer), and only after the
+submission deadline does everyone open their envelope. You can't copy what
+you can't see.
 
-2. **Submit a commitment** (submission phase, before `submissionDeadline`)
+---
 
-   Off-chain, each participant picks a real `answer` and a random 32-byte
-   `salt`, then computes:
+## Key terms (plain-language glossary)
 
-   ```
-   commitment = keccak256(abi.encodePacked(answer, salt, msg.sender, bountyId))
-   ```
+| Term | What it means here |
+|---|---|
+| **Bounty** | A contest with a prize. The creator deposits the prize money into the contract when creating it. |
+| **Hash** | A fingerprint of data. Same input always gives the same fingerprint, but you cannot work backwards from the fingerprint to the input. This contract uses the `keccak256` hash function. |
+| **Commitment** | The "sealed envelope": a hash of your answer (plus a few extra ingredients, see below). Submitting it proves you decided your answer *before* the deadline, without showing the answer. |
+| **Salt** | A random secret number you generate yourself and mix into your hash. Without it, someone could guess likely answers, hash them, and compare against your public commitment. The salt makes that impossible. |
+| **Reveal** | Opening your envelope: submitting your real answer + your salt. The contract re-computes the hash and checks it matches your earlier commitment exactly. |
+| **Precompile** | A special built-in service on Ritual Chain that a contract can call. This contract uses the LLM inference precompile, i.e. "ask an AI a question from inside a smart contract." |
 
-   and submits only the hash:
+---
 
-   ```solidity
-   aiJudge.submitCommitment(bountyId, commitment);
-   ```
+## Lifecycle: the five steps of a bounty
 
-   The answer itself never appears on-chain at this point.
+```
+create ──▶ commit ──▶ reveal ──▶ judge ──▶ finalize
+(owner)   (everyone) (everyone) (owner+AI) (owner)
+```
 
-3. **Reveal** (reveal phase, between `submissionDeadline` and `revealDeadline`)
+### Step 1: Create a bounty (owner)
 
-   ```solidity
-   aiJudge.revealAnswer(bountyId, answer, salt);
-   ```
+The owner sets a title, judging criteria (the "rubric"), two deadlines,
+and sends the prize money along with the call:
 
-   The contract recomputes the hash and reverts on any mismatch (wrong
-   answer, wrong salt, or a typo). A participant who never calls this is
-   excluded from judging entirely.
+```solidity
+aiJudge.createBounty{value: rewardInWei}(
+  "Best one-paragraph explanation of X",
+  "Judged on clarity and correctness",
+  submissionDeadline, // timestamp in MILLISECONDS (see warning below)
+  revealDeadline      // must be after submissionDeadline
+);
+```
 
-4. **Judge** (after `revealDeadline`, owner only)
+> **⚠ Ritual-specific warning: timestamps are in milliseconds.**
+> On most EVM chains `block.timestamp` is in seconds, but on Ritual Chain
+> it is in **milliseconds** since epoch. Pass your deadlines in
+> milliseconds (e.g. JavaScript's `Date.now()` already returns
+> milliseconds). If you pass seconds by mistake, the deadline will look
+> like it is in the distant past and `createBounty` will revert with
+> "submission deadline must be in the future".
 
-   ```solidity
-   aiJudge.judgeAll(bountyId, llmInput);
-   ```
+### Step 2: Submit a commitment (participants, before `submissionDeadline`)
 
-   This calls Ritual's LLM inference precompile once with every revealed
-   answer and stores the AI's output.
+Off-chain (on your own computer), pick your `answer` and generate a random
+32-byte `salt`, then compute:
 
-5. **Finalize** (owner only, after judging)
+```
+commitment = keccak256(abi.encodePacked(answer, salt, msg.sender, bountyId))
+```
 
-   ```solidity
-   aiJudge.finalizeWinner(bountyId, winnerIndex);
-   ```
+Then submit **only the hash**:
 
-   Pays the reward to the chosen (revealed) participant and closes the
-   bounty.
+```solidity
+aiJudge.submitCommitment(bountyId, commitment);
+```
 
-### A note on the salt
+Your actual answer does not appear on-chain at this point. Note the recipe
+also mixes in your own address (`msg.sender`) and the `bountyId`; this
+stops someone from copying your commitment byte-for-byte and submitting it
+as their own, because the hash only verifies for *your* address on *this*
+bounty.
+
+Each address can commit only once per bounty, and a bounty accepts at most
+10 commitments (`MAX_COMMITMENTS`).
+
+### Step 3: Reveal (participants, between the two deadlines)
+
+```solidity
+aiJudge.revealAnswer(bountyId, answer, salt);
+```
+
+The contract re-computes the hash from what you send and compares it with
+your stored commitment. **It must match byte-for-byte**: a different
+answer, a different salt, or even an extra space causes a revert with
+"commitment mismatch". Answers are limited to 2,000 bytes
+(`MAX_ANSWER_LENGTH`).
+
+Anyone who committed but never reveals is simply excluded from judging.
+
+### Step 4: Judge (owner only, after `revealDeadline`)
+
+```solidity
+aiJudge.judgeAll(bountyId, llmInput);
+```
+
+This calls Ritual's LLM inference precompile **once**, with all revealed
+answers batched into a single request (one AI call for the whole bounty,
+not one per answer). The AI's review is stored on-chain.
+
+### Step 5: Finalize (owner only, after judging)
+
+```solidity
+aiJudge.finalizeWinner(bountyId, winnerIndex);
+```
+
+The owner picks the winner (the AI's review is advice, the human decides),
+the prize is paid to that participant, and the bounty closes. The winner
+must be someone who actually revealed.
+
+---
+
+## A note on the salt
 
 The `salt` is a random secret value the participant generates themselves.
 It is not part of the answer and is never shared before the reveal phase.
@@ -136,9 +136,43 @@ Its only job is to make the commitment hash unpredictable: without it,
 someone could guess a likely `answer`, hash it themselves, and check it
 against the public commitment before the reveal deadline. The salt must be
 generated with a cryptographically secure random number generator and kept
-safely until reveal. See `TEST_PLAN.md` section 5 for the risks if it isn't.
+safely until reveal. See `TEST_PLAN.md` section 5 ("Human-input / process
+risks") for what can go wrong if it isn't.
 
-### Reflection: what should be public, what should stay hidden, and what should be decided by AI versus by a human in a bounty system?
+---
+
+## Where to find everything (document map)
+
+| File | What's inside | Homework deliverable it covers |
+|---|---|---|
+| `contracts/AIJudge.sol` | The commit-reveal contract itself | Updated Solidity contract |
+| `README.md` (this file) | Lifecycle explanation + reflection answer | Short README |
+| `TEST_PLAN.md` | Test plan: state transitions, boundary values, abuse cases, valid/invalid reveals | Test plan |
+| `ARCHITECTURE_NOTE.md` | Why commit-reveal, what's public vs. hidden | Architecture note |
+| `ADVANCED_TRACK_DESIGN.md` | Design (not implemented) for TEE-based fully-hidden submissions | Advanced track design document |
+| `../docs/ja/` | Japanese guides to this repository | (extra, for my own reference) |
+
+---
+
+## How this was built and deployed
+
+- Solidity `0.8.24`, Hardhat 3, deployed with Hardhat Ignition.
+- The deployer's private key is stored with `hardhat-keystore`
+  (never written into any file in this repository).
+- Deploy command used:
+
+```shell
+npx hardhat ignition deploy --network ritual ignition/modules/AIJudge.ts
+```
+
+- The `ritual` network is defined in `hardhat.config.ts`
+  (RPC `https://rpc.ritualfoundation.org`, chain id 1979).
+- After deployment, the on-chain bytecode at the address above was
+  verified to match the compiled contract via `eth_getCode`.
+
+---
+
+## Reflection: what should be public, what should stay hidden, and what should be decided by AI versus by a human in a bounty system?
 
 Working on this assignment made me realize that letting AI handle the
 technical execution and deciding how that technology should actually be
@@ -153,3 +187,19 @@ Checking whether a hash matches and comparing many answers against the same
 criteria are tasks that can reasonably be left to AI. But deciding the final
 winner, and taking responsibility for enforcing operational rules like
 proper salt management, should remain with humans.
+
+---
+
+## About the project template
+
+This folder started from the Hardhat 3 starter template (Node.js test
+runner + `viem`). Template basics, kept here for reference:
+
+```shell
+npx hardhat test              # run all tests
+npx hardhat keystore set KEY  # store a private key securely
+npx hardhat ignition deploy --network <name> ignition/modules/<Module>.ts
+```
+
+To learn more about Hardhat 3, see the
+[Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3).

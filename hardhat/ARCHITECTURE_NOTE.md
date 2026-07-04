@@ -1,5 +1,11 @@
 # Architecture Note: AIJudge Commit-Reveal Bounty
 
+> **Plain-language summary:** This document explains *why* the contract is
+> designed the way it is: the unfairness problem in the original version
+> (answers were public immediately), how splitting submission into
+> "commit a sealed hash first, open it later" fixes that, and exactly
+> which information is visible to everyone at each phase.
+
 Deployed contract: `0xcBE5e9086f53F42586d4Cbb4394Db0721512DD7f` (Ritual Testnet, chain id 1979)
 
 ## Background

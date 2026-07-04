@@ -1,5 +1,14 @@
 # Test Plan: AIJudge Commit-Reveal Flow
 
+> **Plain-language summary:** This document lists, in table form, everything
+> that should be tested to trust this contract: that each phase only allows
+> the right actions at the right time (section 1), that size and count
+> limits behave correctly right at their edges (section 2), that cheating
+> or mistaken calls are rejected (section 3), what one successful
+> end-to-end run looks like (section 4), what can go wrong on the *human*
+> side that the contract cannot protect against (section 5), and which
+> known simplifications were left in on purpose (section 6).
+
 Scope: `contracts/AIJudge.sol`, focused on the commit-reveal submission flow
 (`submitCommitment`, `revealAnswer`) and its downstream effects on
 `judgeAll` and `finalizeWinner`. Deployed contract under test:
